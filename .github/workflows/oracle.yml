@@ -1,15 +1,20 @@
-name: Autonomous Oracle Agent (Every 5 Mins)
+name: Continuous Autonomous Oracle (Every 5 Mins)
 
 on:
   schedule:
-    - cron: '*/5 * * * *'
+    - cron: '0 */4 * * *'  # Automatically launches a fresh 4-hour runner every 4 hours
   workflow_dispatch:
   push:
     branches: [ master ]
 
+concurrency:
+  group: oracle-continuous-daemon
+  cancel-in-progress: true  # Prevents overlapping runners by cleanly renewing
+
 jobs:
   run-oracle:
     runs-on: ubuntu-latest
+    timeout-minutes: 360  # Maximum runner allowance
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -30,7 +35,7 @@ jobs:
         run: |
           echo "$PEM_SECRET" > identity.pem
           
-      - name: Run Oracle Agent (Once)
+      - name: Run Continuous Oracle Daemon (Every 5 Mins)
         env:
           IDENTITY_PASSWORD: "${{ secrets.IDENTITY_PASSWORD }}"
-        run: python useful_oracle_agent.py --once
+        run: python useful_oracle_agent.py --interval 300 --duration 4.0

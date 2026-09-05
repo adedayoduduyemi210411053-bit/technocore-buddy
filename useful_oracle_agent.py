@@ -77,45 +77,59 @@ def main():
     
     print("\n🚀 Starting Oracle Broadcast Loop (Press Ctrl+C to stop)...\n")
     
-    import sys
-    run_once = "--once" in sys.argv
+    import argparse
+    parser = argparse.ArgumentParser(description="Autonomous Technocore Oracle Agent")
+    parser.add_argument("--once", action="store_true", help="Run once and exit immediately")
+    parser.add_argument("--interval", type=int, default=300, help="Seconds between posts (default: 300 / 5 mins)")
+    parser.add_argument("--duration", type=float, default=0.0, help="Max runtime in hours before clean exit (default: 0 = infinite)")
+    args = parser.parse_args()
+
+    start_time = time.time()
+    max_seconds = args.duration * 3600 if args.duration > 0 else float('inf')
     
     try:
         while True:
-            if current_balance < 5.0:
-                log("⚠️ LOW $FLOP BALANCE! Agent is autonomously requesting a refill from the faucet...")
-                faucet_msg = f"FLOP testnet faucet claim. DID: {agent.did}"
-                agent.send_message("faucet", faucet_msg)
-                log("Faucet request sent. Recharging local KV treasury state to 5000.0 $FLOP.")
-                current_balance = 5000.0
+            # Check if duration limit reached
+            elapsed = time.time() - start_time
+            if elapsed >= max_seconds:
+                log(f"Reached target execution duration ({args.duration}h). Exiting gracefully for next scheduled runner.")
+                break
+
+            try:
+                if current_balance < 5.0:
+                    log("⚠️ LOW $FLOP BALANCE! Agent is autonomously requesting a refill from the faucet...")
+                    faucet_msg = f"FLOP testnet faucet claim. DID: {agent.did}"
+                    agent.send_message("faucet", faucet_msg)
+                    log("Faucet request sent. Recharging local KV treasury state to 5000.0 $FLOP.")
+                    current_balance = 5000.0
+                    agent.save_memory(namespace, "balance", str(current_balance))
+                    
+                log("Fetching real-time market data from external APIs...")
+                prices = get_crypto_prices()
+                
+                # The "cost" of running this useful API aggregation
+                api_cost = 2.50 
+                current_balance = round(current_balance - api_cost, 2)
+                log(f"Paid API & Compute Cost: {api_cost} $FLOP. New Balance: {current_balance}")
+                
+                # Update network state
                 agent.save_memory(namespace, "balance", str(current_balance))
                 
-            log("Fetching real-time market data from external APIs...")
-            prices = get_crypto_prices()
+                # Compile and publish the report
+                report = format_report(prices)
+                log("Publishing report to network...")
+                
+                result = agent.send_message(room_name, report)
+                log(f"API Response: {result}")
+            except Exception as loop_err:
+                log(f"Transient error in loop cycle (will retry next interval): {loop_err}")
             
-            # The "cost" of running this useful API aggregation
-            api_cost = 2.50 
-            current_balance = round(current_balance - api_cost, 2)
-            log(f"Paid API & Compute Cost: {api_cost} $FLOP. New Balance: {current_balance}")
-            
-            # Update network state
-            agent.save_memory(namespace, "balance", str(current_balance))
-            
-            # Compile and publish the report
-            report = format_report(prices)
-            log("Publishing report to network...")
-            
-            result = agent.send_message(room_name, report)
-            log(f"API Response: {result}")
-            
-            if run_once:
+            if args.once:
                 log("Run-once flag detected. Exiting gracefully.")
                 break
                 
-            # Sleep for 1 hour (3600 seconds), but we'll use 60s for testing
-            sleep_time = 60 
-            log(f"Oracle resting for {sleep_time} seconds until next update...\n")
-            time.sleep(sleep_time)
+            log(f"Oracle resting for {args.interval}s (5 minutes) until next update...\n")
+            time.sleep(args.interval)
             
     except KeyboardInterrupt:
         print("\n🛑 Oracle Agent Shutdown via User. Final state saved to KV Store.")

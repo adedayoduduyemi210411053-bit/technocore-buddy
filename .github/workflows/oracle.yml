@@ -1,8 +1,8 @@
-name: Autonomous Oracle Agent (Hourly)
+name: Autonomous Oracle Agent (Every 5 Mins)
 
 on:
   schedule:
-    - cron: '0 * * * *'
+    - cron: '*/5 * * * *'
   workflow_dispatch:
 
 jobs:

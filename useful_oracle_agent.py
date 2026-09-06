@@ -59,7 +59,8 @@ def main():
         log("CRITICAL: Cannot run oracle agent in read-only mode.")
         return
         
-    namespace = f"oracle-{agent.did[:8]}"
+    clean_key = agent.did.split(":")[-1][:12].lower()
+    namespace = f"oracle-{clean_key}"
     room_name = "general"  # Using an existing room because the server room cap is reached
     
     # 1. Read existing balance from the KV Store

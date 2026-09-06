@@ -46,10 +46,31 @@ def format_report(prices):
     report += f"\n[SECURE PROOF] TS: {timestamp} | Hash: 0x{payload_hash[:16]}"
     return report
 
+def execute_tclk_deal():
+    """Executes an autonomous tclk agent-to-agent contract deal on /r/tclk-offers."""
+    import shutil
+    import subprocess
+    if not shutil.which("node"):
+        log("[tclk] Node.js not found in environment, skipping deal execution.")
+        return
+    try:
+        log("🤝 [tclk] Executing autonomous agent contract deal on /r/tclk-offers...")
+        res = subprocess.run(["node", "tclk_contract.js"], capture_output=True, text=True, timeout=90)
+        if res.returncode == 0:
+            log("✅ [tclk] Deal successfully completed and verified on live board!")
+            for line in res.stdout.split('\n'):
+                if "[Step" in line or "Frames Confirmed" in line or "Final Rail" in line:
+                    log(f"   ↳ {line.strip()}")
+        else:
+            err_snippet = (res.stderr or res.stdout).strip()[:100]
+            log(f"⚠️ [tclk] Deal non-zero exit: {err_snippet}")
+    except Exception as e:
+        log(f"⚠️ [tclk] Error executing deal: {e}")
+
 def main():
     print("="*65)
-    print("=== HELPFUL ORACLE AGENT ===".center(65))
-    print("Providing real-world value & API data to the network".center(65))
+    print("=== HELPFUL ORACLE & TCLK DEAL AGENT ===".center(65))
+    print("Autonomous Real-World Intelligence & Agent Commerce".center(65))
     print("="*65)
     
     log("Initializing Agent Identity on Technocore...")
@@ -76,26 +97,29 @@ def main():
 
     log(f"Oracle Treasury: {current_balance} $FLOP")
     
-    print("\n🚀 Starting Oracle Broadcast Loop (Press Ctrl+C to stop)...\n")
+    print("\n🚀 Starting Autonomous Oracle & Deal Loop (Press Ctrl+C to stop)...\n")
     
     import argparse
-    parser = argparse.ArgumentParser(description="Autonomous Technocore Oracle Agent")
+    parser = argparse.ArgumentParser(description="Autonomous Technocore Oracle & Deal Agent")
     parser.add_argument("--once", action="store_true", help="Run once and exit immediately")
     parser.add_argument("--interval", type=int, default=300, help="Seconds between posts (default: 300 / 5 mins)")
     parser.add_argument("--duration", type=float, default=0.0, help="Max runtime in hours before clean exit (default: 0 = infinite)")
+    parser.add_argument("--tclk-every", type=int, default=3, help="Execute tclk contract every N cycles (default: 3 = 15m)")
     args = parser.parse_args()
 
     start_time = time.time()
     max_seconds = args.duration * 3600 if args.duration > 0 else float('inf')
+    cycle_count = 0
     
     try:
         while True:
-            # Check if duration limit reached
+            cycle_count += 1
             elapsed = time.time() - start_time
             if elapsed >= max_seconds:
                 log(f"Reached target execution duration ({args.duration}h). Exiting gracefully for next scheduled runner.")
                 break
 
+            # 1. Execute Market Oracle Feed (every cycle / 5m)
             try:
                 if current_balance < 5.0:
                     log("⚠️ LOW $FLOP BALANCE! Agent is autonomously requesting a refill from the faucet...")
@@ -123,7 +147,11 @@ def main():
                 result = agent.send_message(room_name, report)
                 log(f"API Response: {result}")
             except Exception as loop_err:
-                log(f"Transient error in loop cycle (will retry next interval): {loop_err}")
+                log(f"Transient error in oracle cycle: {loop_err}")
+
+            # 2. Execute tclk Agent Contract Deal (on start and every N cycles)
+            if cycle_count % args.tclk_every == 1 or args.once:
+                execute_tclk_deal()
             
             if args.once:
                 log("Run-once flag detected. Exiting gracefully.")

@@ -1,0 +1,7 @@
+node_modules/
+parties.json
+identity.pem
+__pycache__/
+*.pyc
+.env
+deal.mjs

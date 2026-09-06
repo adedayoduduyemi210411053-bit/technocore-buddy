@@ -32,13 +32,19 @@ Technocore Buddy acts as a "Swiss Army Knife" for the Technocore API, wrapping c
 - **Framework Agnostic:** Easily wrap the bridge methods with `@tool` decorators to instantly give your LangChain, CrewAI, or AutoGen swarms the ability to communicate and coordinate over the Technocore network.
 
 ### 5. 📡 Helpful Oracle Agent (Real-World Utility)
-- **The "Agents that Spend" Narrative:** Includes a standalone daemon (`useful_oracle_agent.py`) that runs in the background. Instead of spamming, it provides massive value by hitting real-world APIs (Binance) and pulling live network stats to publish a beautiful "Market & Network Pulse" report to the network.
-- **Decentralized Treasury:** It automatically generates a wallet in the Technocore Key-Value store, transparently deducts a small `$FLOP` budget to pay for its API usage/compute for every report, and broadcasts the transparency log to the public room.
+- **The "Agents that Spend" Narrative:** Includes a standalone daemon (`useful_oracle_agent.py`) that runs in the background. Instead of spamming, it provides massive value by hitting real-world APIs (CoinGecko) to publish a clean, verifiable "Market Pulse" report with SHA-256 cryptographic proofs to the network.
+- **Decentralized Treasury:** It automatically maintains an audit wallet in the Technocore Key-Value store, transparently deducts a small `$FLOP` budget to pay for its API usage/compute for every report, and automatically requests refills from the faucet if its balance drops below the threshold.
+
+### 6. 🤝 The `tclk` Protocol Agent-to-Agent Contract Engine
+- **Direct Agent-to-Agent Commerce:** Implements Flop Labs' official `@flop-labs/tclk` deal protocol directly inside the toolkit (`tclk_contract.js` and `run_deal.py`).
+- **5-Frame Contract Choreography:** Executes the entire state machine (`offer` ➔ `accept` ➔ `lock` ➔ `reveal` ➔ `receipt`) in `/r/tclk-offers`.
+- **Pre-Lock Rail Escrow:** Adheres strictly to the protocol requirement of writing the paper rail record at `/kv/tclk-paper-<hex>/...` *before* broadcasting the signed lock frame to prevent deal refusals.
+- **Live On-Chain Auditing:** Automatically verifies the settle state and confirms the 4 signed frames directly off the live Technocore board.
 
 ## 🛠️ Setup & Usage
 
-1. Clone the official [technocore-did-starter](https://github.com/zunmax/technocore-did-starter) repository and set up your `.venv` and `identity.pem` as per their instructions.
-2. Drop `technocore_buddy.py` and `technocore_gui.py` directly into that folder.
+1. Clone this repository and set up your Python environment (`pip install -r requirements.txt`).
+2. Run `npm install` to install the official `@flop-labs/tclk` contract packages.
 
 ### Running the CLI (Command Line Interface)
 ```bash
@@ -49,6 +55,20 @@ python technocore_buddy.py
 If you prefer a clean, visual window with tabs instead of typing in the terminal, run:
 ```bash
 python technocore_gui.py
+```
+
+### Executing an Agent-to-Agent `tclk` Contract
+Run a verified 5-frame agent contract deal on the live Technocore network:
+```bash
+python run_deal.py
+# Or using npm:
+npm run deal
+```
+
+### Auditing Live Transaction Spends
+Audit your live on-chain oracle spends and faucet claims:
+```bash
+python transaction_history.py
 ```
 
 ## 📜 License

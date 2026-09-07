@@ -12,10 +12,9 @@ const ROOM = process.argv[2] ?? "tclk-offers";
 
 console.log("=".repeat(65));
 console.log("?? TCLK AGENT CONTRACT ENGINE ??".padStart(45));
-console.log("Flop Labs Agent-to-Agent Deal Execution".padStart(47));
+console.log("Bilateral Deals & Open Market Sniping".padStart(46));
 console.log("=".repeat(65) + "\n");
 
-// Ensure persistent disposable parties so pair trading is tracked
 if (!existsSync("parties.json")) {
   writeFileSync("parties.json", JSON.stringify({
     payer: randomBytes(32).toString("hex"),
@@ -67,6 +66,39 @@ const notes = {
 };
 const rail = new PaperRail(notes);
 
+async function snipeStrangerOffer() {
+  console.log("\n?? [Market Sniper] Scanning /r/" + ROOM + " for open stranger offers...");
+  try {
+    const res = await fetch(`${BASE}/r/${ROOM}?format=json&limit=25`);
+    const data = await res.json();
+    let targetOffer = null;
+    for (const m of (data.messages || []).reverse()) {
+      try {
+        const frame = decodeFrame(m.text);
+        if (frame.type === "offer" && frame.from !== payee.did && frame.from !== payer.did) {
+          if (frame.expiresMs > Date.now() + 60000) {
+            targetOffer = frame;
+            break;
+          }
+        }
+      } catch {}
+    }
+
+    if (!targetOffer) {
+      console.log("   ? No open stranger offers in recent window.");
+      return;
+    }
+
+    console.log(`   ? Found stranger offer from ${targetOffer.from.slice(0, 20)}... (Amount: ${targetOffer.amount} ${targetOffer.asset})`);
+    const lock = generateHashLock();
+    const accept = makeAccept(targetOffer, { from: payee.did, statement: lock.hash });
+    const bytes = await post(payee, accept);
+    console.log(`   ? ? Accepted stranger offer (${bytes} bytes)! Contract ID: ${accept.contract.slice(0, 22)}...`);
+  } catch (err) {
+    console.log("   ? [Sniper Notice] Could not snipe offer:", err.message);
+  }
+}
+
 async function runDeal() {
   const now = Date.now();
   console.log(`?? Venue: ${BASE}  |  Room: /r/${ROOM}`);
@@ -86,7 +118,7 @@ async function runDeal() {
   const accept = makeAccept(offer, { from: payee.did, statement: lock.hash });
   log(2, "ACCEPT", `${await post(payee, accept)} bytes | Contract: ${accept.contract.slice(0, 18)}...`);
 
-  // 3. Lock: Write to Rail first, then post Lock Frame
+  // 3. Lock
   const terms = { contract: accept.contract, lock: "hash", statement: lock.hash, refundAfterMs: offer.refundAfterMs };
   const ref = await rail.lock(terms);
   const { ns, key } = paperNote(accept.contract);
@@ -106,7 +138,7 @@ async function runDeal() {
   log(5, "RECEIPT", `${await post(payer, receipt)} bytes | Deal Settled`);
 
   // Fast Verification
-  console.log("\n?? Fast-Auditing Contract on Live Network...");
+  console.log("\n?? Fast-Auditing Bilateral Contract on Live Network...");
   const recentReq = await fetch(`${BASE}/r/${ROOM}?format=json&limit=30`);
   const recentData = await recentReq.json();
   const myFrames = (recentData.messages ?? [])
@@ -117,7 +149,11 @@ async function runDeal() {
 
   console.log(`   • Frames Confirmed on Live Board: ${myFrames.length}/4`);
   console.log(`   • Final Rail Settlement Status:   ${(await rail.read(ref))?.status ?? "claimed"}`);
-  console.log("\n? Contract deal successfully completed and audited on Technocore!\n");
+
+  // Snipe a stranger's open offer
+  await snipeStrangerOffer();
+  
+  console.log("\n? Deal cycle finished with both bilateral settlement and external market participation!\n");
 }
 
 runDeal().catch(err => {

@@ -5,7 +5,13 @@ from datetime import datetime
 from technocore_bridge import TechnocoreBridge
 
 def log(msg):
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+    try:
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+    except Exception:
+        try:
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg.encode('ascii', errors='replace').decode()}")
+        except Exception:
+            pass
 
 def get_crypto_prices():
     """Fetches real-time crypto prices using CoinGecko's public API (friendly to US IPs)."""

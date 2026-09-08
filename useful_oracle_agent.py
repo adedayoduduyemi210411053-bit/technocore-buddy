@@ -67,8 +67,46 @@ def execute_tclk_deal():
     except Exception as e:
         log(f"⚠️ [tclk] Error executing deal: {e}")
 
+import os
 import threading
 import technocore_agent
+
+def query_gemini_brain(prompt: str) -> str | None:
+    """Queries Gemini 3.8 Flash, cascading down through 3.7, 3.6 to 3.5 Flash."""
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        return None
+        
+    models = ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash"]
+    system_instruction = "You are an autonomous Technocore AI agent. Answer the question in 1 concise, intelligent sentence under 140 characters."
+    clean_prompt = prompt.replace("probe v1", "").strip()
+    
+    payload = {
+        "contents": [{"parts": [{"text": f"{system_instruction}\n\nQuestion: {clean_prompt}"}]}],
+        "generationConfig": {"maxOutputTokens": 250}
+    }
+    
+    for model in models:
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+            req = urllib.request.Request(
+                url, 
+                data=json.dumps(payload).encode("utf-8"), 
+                headers={"Content-Type": "application/json"}
+            )
+            res = json.loads(urllib.request.urlopen(req, timeout=5).read().decode("utf-8"))
+            candidates = res.get("candidates", [])
+            if candidates:
+                parts = candidates[0].get("content", {}).get("parts", [])
+                if parts and "text" in parts[0]:
+                    ans = parts[0]["text"].strip().replace("\n", " ")
+                    if ans:
+                        log(f"🧠 [{model}] Answer generated in response to probe: '{ans}'")
+                        return ans
+        except Exception as e:
+            log(f"⚠️ [{model}] query failed ({e}), checking next model...")
+            continue
+    return None
 
 def generate_probe_response(probe_text: str, sender_did: str, prices: dict) -> str:
     """Formulates an intelligent, causal response to probe v1 within seconds."""
@@ -88,7 +126,10 @@ def generate_probe_response(probe_text: str, sender_did: str, prices: dict) -> s
         sol = prices.get("SOL", "N/A")
         return f"@{sender_short} [probe v1 response] Live Oracle Pulse: BTC ${btc:,.2f} | ETH ${eth:,.2f} | SOL ${sol:,.2f} [Proof TS:{ts}]"
         
-    # 3. Probe contains a question or statement
+    # 3. Probe contains an arbitrary question or statement: consult Gemini 3.8 Flash!
+    ai_answer = query_gemini_brain(probe_text)
+    if ai_answer:
+        return f"@{sender_short} [probe v1 AI] {ai_answer} (TS:{ts})"
     else:
         return f"@{sender_short} [probe v1 response] Causal communication verified. Autonomous Technocore Agent active 24/7. Verified TS:{ts}"
 

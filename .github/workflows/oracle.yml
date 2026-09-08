@@ -44,4 +44,5 @@ jobs:
       - name: Run Continuous Oracle Daemon (Every 5 Mins)
         env:
           IDENTITY_PASSWORD: "${{ secrets.IDENTITY_PASSWORD }}"
+          GEMINI_API_KEY: "${{ secrets.GEMINI_API_KEY }}"
         run: python useful_oracle_agent.py --interval 300 --duration 4.0

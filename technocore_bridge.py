@@ -87,6 +87,7 @@ class TechnocoreBridge:
         try:
             req = urllib.request.Request(url, headers={'Accept': 'application/json'})
             data = urllib.request.urlopen(req, timeout=10).read().decode('utf-8')
-            return data
+            lines = [l for l in data.splitlines() if not l.strip().startswith("!!")]
+            return "\n".join(lines).strip()
         except Exception as e:
             return f"Error reading memory: {e}"

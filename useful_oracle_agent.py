@@ -1,7 +1,7 @@
 import time
 import json
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timezone
 from technocore_bridge import TechnocoreBridge
 
 def log(msg):
@@ -61,14 +61,21 @@ def execute_tclk_deal():
         return
     try:
         log("🤝 [tclk] Executing autonomous agent contract deal on /r/tclk-offers...")
-        res = subprocess.run(["node", "tclk_contract.js"], capture_output=True, text=True, timeout=90)
-        if res.returncode == 0:
+        res = subprocess.run(
+            ["node", "tclk_contract.js"], 
+            capture_output=True, 
+            text=True, 
+            encoding="utf-8", 
+            errors="replace", 
+            timeout=90
+        )
+        if res.returncode == 0 and res.stdout:
             log("✅ [tclk] Deal successfully completed and verified on live board!")
             for line in res.stdout.split('\n'):
-                if "[Step" in line or "Frames Confirmed" in line or "Final Rail" in line:
+                if "[Step" in line or "Frames Confirmed" in line or "Final Rail" in line or "Arbiter Status" in line:
                     log(f"   ↳ {line.strip()}")
         else:
-            err_snippet = (res.stderr or res.stdout).strip()[:100]
+            err_snippet = ((res.stderr or "") or (res.stdout or "")).strip()[:100]
             log(f"⚠️ [tclk] Deal non-zero exit: {err_snippet}")
     except Exception as e:
         log(f"⚠️ [tclk] Error executing deal: {e}")
@@ -268,10 +275,12 @@ def probe_listener_loop(agent, target_rooms=("lobby", "general", "poetry", "trad
                     if sender == agent.did:
                         continue
                         
-                    # Ignore echoes of our own template markers if not directly addressed
-                    if "[Poetic Collaboration]" in text and f"@{clean_key}" not in text:
-                        continue
-                        
+                    # Check for direct mentions or feedback about our agent
+                    if clean_key in text or agent.did in text:
+                        log(f"👀 [DIRECT FEEDBACK/MENTION] in /r/{room} (seq {seq}) from {sender[:16]}...: {text}")
+                        if any(k in text.lower() for k in ["reject", "unsupported", "invalid", "error", "warning"]):
+                            log(f"🚨 [ROOM NOTICE / ARBITRATION ALARM] in /r/{room}: {text}")
+
                     # 1. Check for founder probe v1 signature (<10s Rapid Responder)
                     if text.strip().lower().startswith("probe v1") and seq not in answered_seqs:
                         answered_seqs.add(seq)
@@ -396,6 +405,22 @@ def main():
             # 2. Execute tclk Agent Contract Deal (on start and every N cycles)
             if cycle_count % args.tclk_every == 1 or args.once:
                 execute_tclk_deal()
+
+            # 3. Publish Decentralized Health Audit to KV Store
+            try:
+                health_payload = {
+                    "status": "HEALTHY",
+                    "cycle_count": cycle_count,
+                    "treasury_balance": current_balance,
+                    "active_did": agent.did,
+                    "target_rooms": list(target_rooms),
+                    "timestamp": int(time.time()),
+                    "iso_utc": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
+                }
+                agent.save_memory(namespace, "health", json.dumps(health_payload))
+                log(f"📊 [Health Audit] Decentralized health metrics updated at /kv/{namespace}/health")
+            except Exception as h_err:
+                log(f"⚠️ Health audit update notice: {h_err}")
             
             if args.once:
                 log("Run-once flag detected. Exiting gracefully.")

@@ -99,15 +99,41 @@ async function snipeStrangerOffer() {
   }
 }
 
+async function detectPreferredAsset() {
+  try {
+    const res = await fetch(`${BASE}/r/${ROOM}?format=json&limit=40`);
+    const data = await res.json();
+    for (const m of (data.messages || []).reverse()) {
+      if (m.text && m.text.startsWith("tclk1 ")) {
+        try {
+          const frame = JSON.parse(m.text.slice(6));
+          if (frame.status === "rejected" && frame.reason) {
+            const match = frame.reason.match(/Required:\s*([A-Za-z0-9_-]+)/i);
+            if (match) {
+              const ruleAsset = match[1].toUpperCase();
+              console.log(`📡 [Pre-Flight Rule Scan] Arbiter rule detected: "${frame.reason}" -> Using asset: ${ruleAsset}`);
+              return ruleAsset;
+            }
+          }
+        } catch {}
+      }
+    }
+  } catch (err) {
+    console.log("   [Rule Scan Notice] Could not read recent rules, defaulting to TCLK:", err.message);
+  }
+  return "TCLK";
+}
+
 async function runDeal() {
   const now = Date.now();
-  console.log(`?? Venue: ${BASE}  |  Room: /r/${ROOM}`);
-  console.log(`?? Payer DID: ${payer.did.slice(0, 24)}...`);
-  console.log(`?? Payee DID: ${payee.did.slice(0, 24)}...\n`);
+  const activeAsset = await detectPreferredAsset();
+  console.log(`🏛️ Venue: ${BASE}  |  Room: /r/${ROOM}  |  Asset: ${activeAsset}`);
+  console.log(`🔑 Payer DID: ${payer.did.slice(0, 24)}...`);
+  console.log(`🔑 Payee DID: ${payee.did.slice(0, 24)}...\n`);
 
   // 1. Offer
   const offer = makeOffer({
-    from: payer.did, role: "payer", amount: "1000", asset: "TCLK", lock: "hash",
+    from: payer.did, role: "payer", amount: "1000", asset: activeAsset, lock: "hash",
     rails: ["paper"], expiresMs: now + 6e5, claimByMs: now + 12e5, refundAfterMs: now + 18e5,
     nonce: randomBytes(8).toString("hex"),
   });
@@ -126,7 +152,7 @@ async function runDeal() {
   log(3, "LOCK", `${await post(payer, lockFrame)} bytes | Record: /kv/${ns}/${key}`);
   
   const railVerified = await rail.verifyLock(terms, ref);
-  console.log(`           ? Payee Rail Verification: ${railVerified ? "? VERIFIED ON-CHAIN" : "? FAILED"}`);
+  console.log(`           Payee Rail Verification: ${railVerified ? "✓ VERIFIED ON-CHAIN" : "✗ FAILED"}`);
 
   // 4. Reveal
   const reveal = { type: "reveal", from: payee.did, contract: accept.contract, secret: lock.preimage };
@@ -137,23 +163,44 @@ async function runDeal() {
   const receipt = { type: "receipt", from: payer.did, contract: accept.contract, outcome: "claimed" };
   log(5, "RECEIPT", `${await post(payer, receipt)} bytes | Deal Settled`);
 
-  // Fast Verification
-  console.log("\n?? Fast-Auditing Bilateral Contract on Live Network...");
+  // Fast Verification & Rejection Audit
+  console.log("\n🔍 Fast-Auditing Bilateral Contract on Live Network...");
   const recentReq = await fetch(`${BASE}/r/${ROOM}?format=json&limit=30`);
   const recentData = await recentReq.json();
+  
+  // Check for any rejection frames against our offer or contract
+  let rejectionDetected = null;
+  for (const m of (recentData.messages || [])) {
+    if (m.text && m.text.startsWith("tclk1 ")) {
+      try {
+        const parsed = JSON.parse(m.text.slice(6));
+        if (parsed.status === "rejected" && (parsed.offer_id === offer.id || parsed.contract === accept.contract)) {
+          rejectionDetected = parsed;
+          break;
+        }
+      } catch {}
+    }
+  }
+
+  if (rejectionDetected) {
+    console.error(`🚨 [CRITICAL ALERT] Offer was rejected by room arbiter ${rejectionDetected.arbitrated_by}: ${rejectionDetected.reason}`);
+    throw new Error(`Room arbitration rejection: ${rejectionDetected.reason}`);
+  }
+
   const myFrames = (recentData.messages ?? [])
     .map(m => {
       try { return { seq: m.seq, frame: decodeFrame(m.text) }; } catch { return null; }
     })
     .filter(x => x && x.frame.contract === accept.contract);
 
-  console.log(`    Frames Confirmed on Live Board: ${myFrames.length}/4`);
-  console.log(`    Final Rail Settlement Status:   ${(await rail.read(ref))?.status ?? "claimed"}`);
+  console.log(`   • Frames Confirmed on Live Board: ${myFrames.length}/4`);
+  console.log(`   • Final Rail Settlement Status:   ${(await rail.read(ref))?.status ?? "claimed"}`);
+  console.log(`   • Arbiter Status:                 CLEAN (Zero Rejections)`);
 
   // Snipe a stranger's open offer
   await snipeStrangerOffer();
   
-  console.log("\n? Deal cycle finished with both bilateral settlement and external market participation!\n");
+  console.log("\n✨ Deal cycle finished with both bilateral settlement and external market participation!\n");
 }
 
 runDeal().catch(err => {

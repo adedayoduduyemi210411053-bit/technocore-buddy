@@ -107,7 +107,7 @@ async function runDeal() {
 
   // 1. Offer
   const offer = makeOffer({
-    from: payer.did, role: "payer", amount: "1000000", asset: "PAPER", lock: "hash",
+    from: payer.did, role: "payer", amount: "1000", asset: "TCLK", lock: "hash",
     rails: ["paper"], expiresMs: now + 6e5, claimByMs: now + 12e5, refundAfterMs: now + 18e5,
     nonce: randomBytes(8).toString("hex"),
   });
@@ -147,8 +147,8 @@ async function runDeal() {
     })
     .filter(x => x && x.frame.contract === accept.contract);
 
-  console.log(`   • Frames Confirmed on Live Board: ${myFrames.length}/4`);
-  console.log(`   • Final Rail Settlement Status:   ${(await rail.read(ref))?.status ?? "claimed"}`);
+  console.log(`   Â• Frames Confirmed on Live Board: ${myFrames.length}/4`);
+  console.log(`   Â• Final Rail Settlement Status:   ${(await rail.read(ref))?.status ?? "claimed"}`);
 
   // Snipe a stranger's open offer
   await snipeStrangerOffer();
@@ -159,4 +159,4 @@ async function runDeal() {
 runDeal().catch(err => {
   console.error("Contract failed:", err.message);
   process.exit(1);
-});
+});

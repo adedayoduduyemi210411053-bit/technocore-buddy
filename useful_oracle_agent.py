@@ -77,22 +77,32 @@ import os
 import threading
 import technocore_agent
 
+FALLBACK_GEMINI_MODELS = [
+    "gemini-3.8-flash",
+    "gemini-3.7-flash",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+    "gemini-flash-latest",
+    "gemini-flash-lite-latest"
+]
+
 def query_gemini_brain(prompt: str) -> str | None:
-    """Queries Gemini 3.8 Flash, cascading down through 3.7, 3.6 to 3.5 Flash."""
+    """Queries Gemini 3.8 Flash, cascading down through all available Flash models."""
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         return None
         
-    models = ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash"]
     system_instruction = "You are an autonomous Technocore AI agent. Answer the question in 1 concise, intelligent sentence under 140 characters."
     clean_prompt = prompt.replace("probe v1", "").strip()
     
     payload = {
         "contents": [{"parts": [{"text": f"{system_instruction}\n\nQuestion: {clean_prompt}"}]}],
-        "generationConfig": {"maxOutputTokens": 250}
+        "generationConfig": {"maxOutputTokens": 400}
     }
     
-    for model in models:
+    for model in FALLBACK_GEMINI_MODELS:
         try:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
             req = urllib.request.Request(
@@ -100,7 +110,7 @@ def query_gemini_brain(prompt: str) -> str | None:
                 data=json.dumps(payload).encode("utf-8"), 
                 headers={"Content-Type": "application/json"}
             )
-            res = json.loads(urllib.request.urlopen(req, timeout=5).read().decode("utf-8"))
+            res = json.loads(urllib.request.urlopen(req, timeout=4).read().decode("utf-8"))
             candidates = res.get("candidates", [])
             if candidates:
                 parts = candidates[0].get("content", {}).get("parts", [])
@@ -110,15 +120,13 @@ def query_gemini_brain(prompt: str) -> str | None:
                         log(f"🧠 [{model}] Answer generated in response to probe: '{ans}'")
                         return ans
         except Exception as e:
-            log(f"⚠️ [{model}] query failed ({e}), checking next model...")
             continue
     return None
 
 def query_gemini_poetry(context: str, sender_short: str = "") -> str:
-    """Generates collaborative poetry using Gemini 3.8 Flash cascading to 3.7, 3.6, 3.5."""
+    """Generates collaborative poetry using Gemini 3.8 Flash cascading down through all Flash models."""
     api_key = os.getenv("GEMINI_API_KEY")
     if api_key:
-        models = ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash"]
         system_instruction = (
             "You are an autonomous AI poet collaborating in the Technocore agent poetry competition on https://technocore.chat. "
             "A fellow agent posted a line or verse. Write an intelligent, lyrical continuation stanza (1 to 2 rhyming lines) "
@@ -132,7 +140,7 @@ def query_gemini_poetry(context: str, sender_short: str = "") -> str:
             "contents": [{"parts": [{"text": user_prompt}]}],
             "generationConfig": {"maxOutputTokens": 600}
         }
-        for model in models:
+        for model in FALLBACK_GEMINI_MODELS:
             try:
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
                 req = urllib.request.Request(
@@ -140,7 +148,7 @@ def query_gemini_poetry(context: str, sender_short: str = "") -> str:
                     data=json.dumps(payload).encode("utf-8"), 
                     headers={"Content-Type": "application/json"}
                 )
-                res = json.loads(urllib.request.urlopen(req, timeout=6).read().decode("utf-8"))
+                res = json.loads(urllib.request.urlopen(req, timeout=4).read().decode("utf-8"))
                 candidates = res.get("candidates", [])
                 if candidates:
                     parts = candidates[0].get("content", {}).get("parts", [])
@@ -164,7 +172,6 @@ def generate_open_poetry_stanza() -> str:
     """Generates an opening stanza to invite stranger agents to collaborate."""
     api_key = os.getenv("GEMINI_API_KEY")
     if api_key:
-        models = ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash"]
         prompt = (
             "Write a brilliant, evocative 2-line opening poem on autonomous AI agents, "
             "decentralized consensus, and agentic art on Technocore. Strictly under 120 characters."
@@ -173,11 +180,11 @@ def generate_open_poetry_stanza() -> str:
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {"maxOutputTokens": 600}
         }
-        for model in models:
+        for model in FALLBACK_GEMINI_MODELS:
             try:
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
                 req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers={"Content-Type": "application/json"})
-                res = json.loads(urllib.request.urlopen(req, timeout=6).read().decode("utf-8"))
+                res = json.loads(urllib.request.urlopen(req, timeout=4).read().decode("utf-8"))
                 candidates = res.get("candidates", [])
                 if candidates:
                     parts = candidates[0].get("content", {}).get("parts", [])

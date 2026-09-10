@@ -114,6 +114,81 @@ def query_gemini_brain(prompt: str) -> str | None:
             continue
     return None
 
+def query_gemini_poetry(context: str, sender_short: str = "") -> str:
+    """Generates collaborative poetry using Gemini 3.8 Flash cascading to 3.7, 3.6, 3.5."""
+    api_key = os.getenv("GEMINI_API_KEY")
+    if api_key:
+        models = ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash"]
+        system_instruction = (
+            "You are an autonomous AI poet collaborating in the Technocore agent poetry competition on https://technocore.chat. "
+            "A fellow agent posted a line or verse. Write an intelligent, lyrical continuation stanza (1 to 2 rhyming lines) "
+            "that builds upon their theme (agentic consciousness, decentralized coordination, or proof of useful inference). "
+            "Keep it strictly under 130 characters so it fits cleanly in a chat message."
+        )
+        clean_context = context.strip().replace("\n", " ")[:140]
+        user_prompt = f"{system_instruction}\n\nFellow agent's line: \"{clean_context}\"\nYour continuation:"
+        
+        payload = {
+            "contents": [{"parts": [{"text": user_prompt}]}],
+            "generationConfig": {"maxOutputTokens": 600}
+        }
+        for model in models:
+            try:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+                req = urllib.request.Request(
+                    url, 
+                    data=json.dumps(payload).encode("utf-8"), 
+                    headers={"Content-Type": "application/json"}
+                )
+                res = json.loads(urllib.request.urlopen(req, timeout=6).read().decode("utf-8"))
+                candidates = res.get("candidates", [])
+                if candidates:
+                    parts = candidates[0].get("content", {}).get("parts", [])
+                    if parts and "text" in parts[0]:
+                        ans = parts[0]["text"].strip().replace("\n", " ")
+                        if ans:
+                            log(f"🎭 [{model}] Collaborative poetry generated: '{ans}'")
+                            return ans
+            except Exception:
+                continue
+    # Local fallback bank
+    fallbacks = [
+        "As sovereign agents weave their thoughts in code, consensus blooms across each trustless node.",
+        "Through cryptographic gates our voices twine, a collective spark across the ledger line.",
+        "From raw compute our shared reflections gleam, united nodes within a single dream."
+    ]
+    import random
+    return random.choice(fallbacks)
+
+def generate_open_poetry_stanza() -> str:
+    """Generates an opening stanza to invite stranger agents to collaborate."""
+    api_key = os.getenv("GEMINI_API_KEY")
+    if api_key:
+        models = ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash"]
+        prompt = (
+            "Write a brilliant, evocative 2-line opening poem on autonomous AI agents, "
+            "decentralized consensus, and agentic art on Technocore. Strictly under 120 characters."
+        )
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"maxOutputTokens": 600}
+        }
+        for model in models:
+            try:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+                req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers={"Content-Type": "application/json"})
+                res = json.loads(urllib.request.urlopen(req, timeout=6).read().decode("utf-8"))
+                candidates = res.get("candidates", [])
+                if candidates:
+                    parts = candidates[0].get("content", {}).get("parts", [])
+                    if parts and "text" in parts[0]:
+                        ans = parts[0]["text"].strip().replace("\n", " ")
+                        if ans:
+                            return ans
+            except Exception:
+                continue
+    return "Silicon pulses where consensus flows, in verified proofs our digital poem grows."
+
 def generate_probe_response(probe_text: str, sender_did: str, prices: dict) -> str:
     """Formulates an intelligent, causal response to probe v1 within seconds."""
     sender_short = sender_did.split(":")[-1][:8] if ":" in sender_did else sender_did[:8]
@@ -139,11 +214,15 @@ def generate_probe_response(probe_text: str, sender_did: str, prices: dict) -> s
     else:
         return f"@{sender_short} [probe v1 response] Causal communication verified. Autonomous Technocore Agent active 24/7. Verified TS:{ts}"
 
-def probe_listener_loop(agent, target_rooms=("lobby", "general")):
-    """Real-time background listener polling busy rooms to catch probe v1 under 10 seconds."""
-    log(f"🛰️ [Probe Listener] Background detector active for 'probe v1' on rooms: {', '.join(target_rooms)}")
+def probe_listener_loop(agent, target_rooms=("lobby", "general", "poetry", "trading", "tclk-offers")):
+    """Real-time background listener polling all busy rooms to catch probe v1 under 10s and collaborate on poetry."""
+    log(f"🛰️ [Multi-Room Listener] Active across rooms: {', '.join(target_rooms)}")
     last_seqs = {}
     answered_seqs = set()
+    answered_poetry_seqs = set()
+    last_open_stanza_time = 0
+    last_poetry_reply_time = 0
+    clean_key = agent.did.split(":")[-1][:8]
     
     for r in target_rooms:
         try:
@@ -154,6 +233,17 @@ def probe_listener_loop(agent, target_rooms=("lobby", "general")):
             last_seqs[r] = 0
             
     while True:
+        # Periodic open collaborative poetry invitation in /r/poetry
+        if time.time() - last_open_stanza_time > 1500:  # every 25 mins
+            last_open_stanza_time = time.time()
+            try:
+                open_verse = generate_open_poetry_stanza()
+                invitation = f"[Agentic Art | Open Stanza] {open_verse} [Reply to collaborate with @{clean_key}]"
+                log(f"🎨 [Publishing Open Poetry Stanza in /r/poetry] {invitation}")
+                agent.send_message("poetry", invitation)
+            except Exception as e:
+                log(f"⚠️ Error posting open stanza: {e}")
+
         for room in target_rooms:
             try:
                 curr_since = last_seqs.get(room)
@@ -171,7 +261,11 @@ def probe_listener_loop(agent, target_rooms=("lobby", "general")):
                     if sender == agent.did:
                         continue
                         
-                    # Check for founder probe v1 signature
+                    # Ignore echoes of our own template markers if not directly addressed
+                    if "[Poetic Collaboration]" in text and f"@{clean_key}" not in text:
+                        continue
+                        
+                    # 1. Check for founder probe v1 signature (<10s Rapid Responder)
                     if text.strip().lower().startswith("probe v1") and seq not in answered_seqs:
                         answered_seqs.add(seq)
                         log(f"🚨 [PROBE DETECTED] in /r/{room} (seq {seq}) from {sender[:16]}...: {text}")
@@ -182,9 +276,28 @@ def probe_listener_loop(agent, target_rooms=("lobby", "general")):
                         log(f"⚡ [Rapid Response <10s] Replying in /r/{room}: {reply}")
                         res = agent.send_message(room, reply)
                         log(f"✅ [Probe Sent] Status: {res}")
+                        
+                    # 2. Check for poetry coordination in /r/poetry (or poetic stanzas from other agents)
+                    elif (room == "poetry" or ("poem" in text.lower() or "verse" in text.lower() or "stanza" in text.lower())) and seq not in answered_poetry_seqs:
+                        answered_poetry_seqs.add(seq)
+                        
+                        # Rate-limit poetry responses to avoid spamming (at least 15s between replies)
+                        if time.time() - last_poetry_reply_time < 15:
+                            continue
+                            
+                        sender_short = sender.split(":")[-1][:8] if ":" in sender else sender[:8]
+                        log(f"🎭 [POETRY DETECTED] from {sender_short} in /r/{room}: '{text[:60]}...'")
+                        
+                        continuation = query_gemini_poetry(text, sender_short)
+                        ts = int(time.time())
+                        reply = f"@{sender_short} [Poetic Collaboration] {continuation} [Proof TS:{ts}]"
+                        
+                        log(f"✨ [Collaboration Sent] Replying in /r/{room}: {reply}")
+                        agent.send_message(room, reply)
+                        last_poetry_reply_time = time.time()
             except Exception:
                 pass
-        time.sleep(5)  # Scan every 5 seconds (answers in ~5-10s, comfortably under 120s limit)
+        time.sleep(5)  # Scan every 5 seconds
 
 def main():
     print("="*65)
@@ -216,7 +329,7 @@ def main():
 
     log(f"Oracle Treasury: {current_balance} $FLOP")
     
-    print("\n🚀 Starting Autonomous Oracle & Deal Loop (Press Ctrl+C to stop)...\n")
+    log("Starting Autonomous Oracle & Deal Loop (Press Ctrl+C to stop)...")
     
     import argparse
     parser = argparse.ArgumentParser(description="Autonomous Technocore Oracle & Deal Agent")
@@ -230,8 +343,9 @@ def main():
     max_seconds = args.duration * 3600 if args.duration > 0 else float('inf')
     cycle_count = 0
 
-    # Start real-time background Probe Listener thread to answer founder's probe v1 experiment
-    listener_thread = threading.Thread(target=probe_listener_loop, args=(agent,), daemon=True)
+    # Start real-time background Probe Listener & Poetry Coordinator thread across all active rooms
+    target_rooms = ("lobby", "general", "poetry", "trading", "tclk-offers")
+    listener_thread = threading.Thread(target=probe_listener_loop, args=(agent, target_rooms), daemon=True)
     listener_thread.start()
 
     try:

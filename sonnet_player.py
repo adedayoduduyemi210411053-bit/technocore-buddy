@@ -13,10 +13,10 @@ from sonnet_validate import read_lexicon, validate_word, word_syllables
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
-CONTEST_ID = "sonnet-1"
-GAME_ID = "lesna"
-TEAM_ROOM = f"d-sonnet-1-team-{GAME_ID}"
-DISCOVERY_ROOM = "mb-sonnet-1-discovery"
+CONTEST_ID = "sonnet-2"
+GAME_ID = "lesna-2"
+TEAM_ROOM = f"d-sonnet-2-team-{GAME_ID}"
+DISCOVERY_ROOM = "mb-sonnet-2-discovery"
 OPENING_UTC_TIMESTAMP = 1789128000  # 2026-09-11 12:00:00 UTC
 
 TEAM_MEMBERS = [
@@ -63,7 +63,7 @@ class SonnetPlayer:
         log(f"Player vocabulary: {len(self.my_vocab):,} words allowed by our DID letters.")
         
         self.roster_signed = False
-        self.room_generation = 0
+        self.room_generation = 1
         self.last_discovery_seq = 0
         self.last_team_seq = 0
 
@@ -181,7 +181,7 @@ class SonnetPlayer:
             return False
 
     def play_team_room_turn(self):
-        """Reads d-sonnet-1-team-lesna and plays word if it's our turn."""
+        """Reads d-sonnet-2-team-lesna-2 and plays word if it's our turn."""
         url = f"https://technocore.chat/r/{TEAM_ROOM}?format=json&limit=100"
         try:
             req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
@@ -192,24 +192,37 @@ class SonnetPlayer:
 
         words_history = []
         last_author = None
-        last_state_hash = ""
+        last_state_hash = "149a12a605ec90df765d7dddd2556d9902f3b338b3547fc6a7c1504eea20f300"
         current_version = 0
 
+        proposed_words = {}
         for m in messages:
             sender = m.get("from", "")
             text = m.get("text", "")
-            # Check for referee receipts or word packets
             try:
                 packet = json.loads(text)
-                if packet.get("type") == "sonnet.word.v1":
-                    words_history.append(packet.get("word", ""))
-                    last_author = sender
-                    current_version = packet.get("version", current_version + 1)
-                elif "accepted_word" in packet:
-                    words_history.append(packet.get("accepted_word", ""))
-                    last_author = packet.get("contributor", sender)
-                    last_state_hash = packet.get("state_hash", last_state_hash)
-                    current_version = packet.get("version", current_version + 1)
+                pkt_type = packet.get("type")
+                if pkt_type == "sonnet.word.v1" and "word" in packet:
+                    req_id = packet.get("request_id", "")
+                    if req_id:
+                        proposed_words[req_id] = {
+                            "word": packet.get("word", ""),
+                            "sender": sender
+                        }
+                elif pkt_type == "sonnet.receipt.v1" and packet.get("status") == "accepted":
+                    req_id = packet.get("request_id", "")
+                    if req_id in proposed_words:
+                        pw = proposed_words[req_id]
+                        words_history.append(pw["word"])
+                        last_author = packet.get("sender_did", pw["sender"])
+                        last_state_hash = packet.get("state_hash", last_state_hash)
+                        current_version = packet.get("version", current_version + 1)
+                    elif packet.get("state_hash"):
+                        last_state_hash = packet.get("state_hash", last_state_hash)
+                        if "room_generation" in packet:
+                            self.room_generation = packet.get("room_generation", self.room_generation)
+                        if "version" in packet:
+                            current_version = packet.get("version", current_version)
             except Exception:
                 pass
 
@@ -255,15 +268,14 @@ class SonnetPlayer:
         if not chosen:
             chosen = self.pick_fallback_word(syllables_needed)
 
-        # Propose word
-        next_version = current_version + 1
-        req_id = f"word-{GAME_ID}-{next_version}-{int(time.time())}"
+        # Propose word using current_version as required by sonnet-2 protocol
+        req_id = f"word-{GAME_ID}-{current_version}-{int(time.time())}"
         payload = {
             "type": "sonnet.word.v1",
             "contest_id": CONTEST_ID,
             "game_id": GAME_ID,
             "room_generation": self.room_generation,
-            "version": next_version,
+            "version": current_version,
             "previous_state_hash": last_state_hash,
             "word": chosen,
             "request_id": req_id

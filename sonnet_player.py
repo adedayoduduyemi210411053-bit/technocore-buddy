@@ -234,6 +234,19 @@ class SonnetPlayer:
             log(f"🎉 [TEAM COMPLETE] 14 lines reached ({total_syllables} syllables)!")
             return
 
+        # Check our historical contribution count in this poem
+        my_contributions_count = sum(
+            1 for m in messages 
+            if m.get("from") == self.did and ("sonnet.word.v1" in m.get("text", "") or "accepted_word" in m.get("text", ""))
+        )
+
+        # Zero-Burden Guard:
+        # If we are on Line 14 and have already contributed our mandatory word(s),
+        # yield the closing words of Line 14 so Team Lead / teammates become the final contributor responsible for publishing to X.
+        if current_line_idx == 14 and current_line_syllables >= 4 and my_contributions_count >= 1:
+            log(f"🛡️ [Zero-Burden Guard Active] Line 14 at {current_line_syllables}/10 syllables. Yielding closing word to Team Lead (@LesnaCrex) for X submission.")
+            return
+
         log(f"🎯 [OUR TURN!] Line {current_line_idx}/14 | Line syllables: {current_line_syllables}/10 | Budget: {syllables_needed}")
         
         # Select best word

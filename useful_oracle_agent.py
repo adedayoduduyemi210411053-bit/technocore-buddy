@@ -485,23 +485,23 @@ def main():
     listener_thread = threading.Thread(target=probe_listener_loop, args=(agent, target_rooms), daemon=True)
     listener_thread.start()
 
-    # Start autonomous Sonnet Challenge player thread for Team Lesna
+    # Start autonomous Sonnet Challenge Outer Supervisor thread for Team Lesna
     try:
-        from sonnet_player import SonnetPlayer
-        def run_sonnet_player():
+        from sonnet_supervisor import SonnetSupervisor
+        def run_sonnet_supervisor():
             try:
-                sp = SonnetPlayer()
-                sp.agent = agent
-                sp.did = agent.did
-                sp.run_loop()
+                sup = SonnetSupervisor()
+                sup.agent = agent
+                sup.did = agent.did
+                sup.run_supervisor_loop(poll_interval=10)
             except Exception as e:
-                log(f"⚠️ Sonnet loop notice: {e}")
+                log(f"⚠️ Sonnet supervisor loop notice: {e}")
 
-        sonnet_thread = threading.Thread(target=run_sonnet_player, daemon=True)
+        sonnet_thread = threading.Thread(target=run_sonnet_supervisor, daemon=True)
         sonnet_thread.start()
-        log("🎭 [Sonnet 100k Challenge] Autonomous Player thread active for Team Lesna!")
+        log("🎭 [Sonnet 100k Challenge] Autonomous Outer Supervisor thread active for Team Lesna!")
     except Exception as sonnet_init_err:
-        log(f"⚠️ Sonnet Player initialization notice: {sonnet_init_err}")
+        log(f"⚠️ Sonnet Supervisor initialization notice: {sonnet_init_err}")
 
     try:
         while True:

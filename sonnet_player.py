@@ -35,7 +35,7 @@ FALLBACK_GEMINI_MODELS = [
 
 def log(msg):
     ts = datetime.now().strftime("%H:%M:%S")
-    print(f"[{ts}] {msg}")
+    print(f"[{ts}] {msg}", flush=True)
 
 class SonnetPlayer:
     def __init__(self, key_file="identity.pem"):
@@ -137,10 +137,15 @@ class SonnetPlayer:
             data = json.loads(urllib.request.urlopen(req, timeout=8).read().decode('utf-8'))
             for m in data.get("messages", []):
                 t = m.get("text", "")
-                if m.get("from") == self.did and "sonnet.roster.v1" in t and GAME_ID in t:
-                    log(f"✅ Roster signature already verified in discovery at seq {m.get('seq')}.")
-                    self.roster_signed = True
-                    return True
+                if m.get("from") == self.did:
+                    try:
+                        pkt = json.loads(t)
+                        if pkt.get("type") == "sonnet.roster.v1" and pkt.get("game_id") == GAME_ID:
+                            log(f"✅ Formal sonnet.roster.v1 verified in discovery at seq {m.get('seq')}.")
+                            self.roster_signed = True
+                            return True
+                    except Exception:
+                        pass
                 # Detect any room generation update from lead or referee
                 if GAME_ID in t and "generation" in t:
                     try:

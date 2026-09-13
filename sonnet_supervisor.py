@@ -10,6 +10,8 @@ from pathlib import Path
 from datetime import datetime, timezone
 from technocore_bridge import TechnocoreBridge
 from sonnet_validate import read_lexicon
+import technocore_agent
+from cryptography.hazmat.primitives.asymmetric import ed25519
 
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -414,12 +416,70 @@ class SonnetSupervisor:
         res = self.agent.send_message(self.team_room, json.dumps(payload, separators=(',', ':')))
         log(f"Word submission result: {res}")
 
+    def ensure_tclk_voters_registered_and_voted(self):
+        """Autonomously registers payer/payee from parties.json as voters and maintains ballots for lesna-2."""
+        parties_file = "parties.json"
+        if not os.path.exists(parties_file):
+            return
+
+        now = time.time()
+        if hasattr(self, "_last_voter_sync") and (now - self._last_voter_sync) < 7200:
+            return
+        self._last_voter_sync = now
+
+        try:
+            with open(parties_file, "r") as f:
+                data = json.load(f)
+
+            reg_room = self.rooms.get("registration", f"mb-{self.contest_id}-registration")
+            votes_room = self.rooms.get("votes", f"mb-{self.contest_id}-votes")
+
+            for role in ["payer", "payee"]:
+                if role not in data:
+                    continue
+                seed_bytes = bytes.fromhex(data[role])
+                priv = ed25519.Ed25519PrivateKey.from_private_bytes(seed_bytes)
+                did = technocore_agent.did_from_private_key(priv)
+
+                # 1. Register as voter
+                reg_payload = json.dumps({
+                    "type": "sonnet.register.v1",
+                    "contest_id": self.contest_id,
+                    "role": "voter",
+                    "request_id": f"voter-reg-{role}-{int(now)}"
+                }, separators=(',', ':'))
+                try:
+                    technocore_agent.post_signed_message(priv, reg_room, reg_payload)
+                    log(f"🗳️ [Autonomous Voter] Re-registered {role} ({did[:16]}...) in {reg_room}")
+                except Exception as e:
+                    log(f"Notice during {role} voter reg: {e}")
+
+                time.sleep(1)
+
+                # 2. Cast ballot for our entry
+                ballot_payload = json.dumps({
+                    "type": "sonnet.ballot.v1",
+                    "contest_id": self.contest_id,
+                    "entry_id": self.game_id,
+                    "voter_did": did,
+                    "request_id": f"ballot-{role}-{self.game_id}-{int(now)}"
+                }, separators=(',', ':'))
+                try:
+                    technocore_agent.post_signed_message(priv, votes_room, ballot_payload)
+                    log(f"🗳️ [Autonomous Voter] Cast ballot for '{self.game_id}' from {role} ({did[:16]}...) in {votes_room}")
+                except Exception as e:
+                    log(f"Notice during {role} ballot cast: {e}")
+                time.sleep(1)
+        except Exception as err:
+            log(f"Notice in ensure_tclk_voters_registered_and_voted: {err}")
+
     def run_supervisor_cycle(self):
         """Executes a single end-to-end supervisor reconciliation cycle."""
         self.discover_active_contest()
         self.sync_team_room_state()
         self.ensure_registration()
         self.ensure_roster_signed()
+        self.ensure_tclk_voters_registered_and_voted()
         self.check_teammate_mentions()
         self.play_turn_if_ready()
         self.status = "HEALTHY_ACTIVE"

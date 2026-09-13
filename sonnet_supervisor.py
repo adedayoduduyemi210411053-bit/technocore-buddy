@@ -304,6 +304,23 @@ class SonnetSupervisor:
 
     def play_turn_if_ready(self):
         """Reads poem room, parses referee receipts, and submits next word if it is our turn."""
+        if getattr(self, "poem_complete", False):
+            return
+
+        # Check if already submitted and accepted in submissions room
+        sub_room = self.rooms.get("submissions", f"mb-{self.contest_id}-submissions")
+        sub_url = f"https://technocore.chat/r/{sub_room}?format=json&limit=30"
+        sub_data = fetch_json(sub_url, timeout=5)
+        for sm in sub_data.get("messages", []):
+            try:
+                sp = json.loads(sm.get("text", "{}"))
+                if sp.get("type") == "sonnet.receipt.v1" and sp.get("entry_id") == self.game_id and sp.get("status") == "accepted":
+                    self.poem_complete = True
+                    log(f"🎉 [{self.game_id}] Submission officially accepted on ballot! Word generation permanently disabled.")
+                    return
+            except Exception:
+                pass
+
         url = f"https://technocore.chat/r/{self.team_room}?format=json&limit=100"
         data = fetch_json(url, timeout=6)
         messages = data.get("messages", [])
@@ -320,6 +337,10 @@ class SonnetSupervisor:
             try:
                 packet = json.loads(text)
                 pkt_type = packet.get("type")
+                if pkt_type == "sonnet.receipt.v1" and (packet.get("complete") is True or packet.get("syllables", 0) >= 140):
+                    self.poem_complete = True
+                    log(f"🎉 [{self.team_room}] Room marked complete (140 syllables) by referee! Word generation permanently disabled.")
+                    return
                 if pkt_type == "sonnet.word.v1" and "word" in packet:
                     req_id = packet.get("request_id", "")
                     if req_id:

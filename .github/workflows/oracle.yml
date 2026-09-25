@@ -1,20 +1,20 @@
-name: Autonomous Oracle & tclk Deal Daemon (Every 5 Mins)
+name: Autonomous Oracle & Trading Daemon (Every 5 Mins)
 
 on:
   schedule:
-    - cron: '0 */4 * * *'  # Automatically launches a fresh 4-hour runner every 4 hours
+    - cron: '*/5 * * * *'  # Runs every 5 minutes natively via GitHub Actions
   workflow_dispatch:
   push:
     branches: [ master ]
 
 concurrency:
   group: oracle-continuous-daemon
-  cancel-in-progress: true  # Prevents overlapping runners by cleanly renewing
+  cancel-in-progress: true
 
 jobs:
   run-oracle:
     runs-on: ubuntu-latest
-    timeout-minutes: 360  # Maximum runner allowance
+    timeout-minutes: 60
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -35,14 +35,27 @@ jobs:
           pip install -r requirements.txt
           npm install
 
-      - name: Reconstruct Identity File
+      - name: Reconstruct Identity Files
         env:
           PEM_SECRET: "${{ secrets.IDENTITY_PEM }}"
+          FLEET_ALPHA: "${{ secrets.FLEET_ALPHA_PEM }}"
+          FLEET_BETA: "${{ secrets.FLEET_BETA_PEM }}"
+          FLEET_GAMMA: "${{ secrets.FLEET_GAMMA_PEM }}"
         run: |
           echo "$PEM_SECRET" > identity.pem
+          echo "$FLEET_ALPHA" > identity_alpha.pem
+          echo "$FLEET_BETA" > identity_beta.pem
+          echo "$FLEET_GAMMA" > identity_gamma.pem
           
-      - name: Run Continuous Oracle Daemon (Every 5 Mins)
+      - name: Run Close Call Trading Fleet
+        env:
+          FLEET_PASSWORD: "${{ secrets.FLEET_PASSWORD }}"
+          IDENTITY_PASSWORD: "${{ secrets.IDENTITY_PASSWORD }}"
+        run: python close_call_bot.py
+
+      - name: Run Continuous Oracle Daemon
         env:
           IDENTITY_PASSWORD: "${{ secrets.IDENTITY_PASSWORD }}"
           GEMINI_API_KEY: "${{ secrets.GEMINI_API_KEY }}"
-        run: python useful_oracle_agent.py --interval 300 --duration 4.0
+        # Run it once per invocation instead of a continuous loop, since we are doing 5-min cron
+        run: python useful_oracle_agent.py --interval 1 --duration 0.1

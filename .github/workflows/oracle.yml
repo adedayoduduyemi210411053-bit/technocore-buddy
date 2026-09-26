@@ -2,7 +2,7 @@ name: Autonomous Oracle & Trading Daemon (Every 5 Mins)
 
 on:
   schedule:
-    - cron: '*/5 * * * *'  # Runs every 5 minutes natively via GitHub Actions
+    - cron: '0 */4 * * *'  # Launches a 4-hour runner every 4 hours to bypass cron throttling
   workflow_dispatch:
   push:
     branches: [ master ]
@@ -14,7 +14,7 @@ concurrency:
 jobs:
   run-oracle:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 360
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -47,15 +47,16 @@ jobs:
           echo "$FLEET_BETA" > identity_beta.pem
           echo "$FLEET_GAMMA" > identity_gamma.pem
           
-      - name: Run Close Call Trading Fleet
+      - name: Run Close Call Trading Fleet Daemon
         env:
           FLEET_PASSWORD: "${{ secrets.FLEET_PASSWORD }}"
           IDENTITY_PASSWORD: "${{ secrets.IDENTITY_PASSWORD }}"
-        run: python close_call_bot.py
+        # Run continuously inside the runner for 4 hours
+        run: python close_call_bot.py --duration 4.0 &
 
       - name: Run Continuous Oracle Daemon
         env:
           IDENTITY_PASSWORD: "${{ secrets.IDENTITY_PASSWORD }}"
           GEMINI_API_KEY: "${{ secrets.GEMINI_API_KEY }}"
-        # Run it once per invocation instead of a continuous loop, since we are doing 5-min cron
-        run: python useful_oracle_agent.py --interval 1 --duration 0.1
+        # Run continuously inside the runner for 4 hours
+        run: python useful_oracle_agent.py --interval 300 --duration 4.0

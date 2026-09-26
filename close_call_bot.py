@@ -6,6 +6,8 @@ import os
 from pathlib import Path
 import technocore_agent
 import logging
+import argparse
+from datetime import datetime, timedelta
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger('close_call_bot')
@@ -13,11 +15,6 @@ logger = logging.getLogger('close_call_bot')
 FLEET = ['alpha', 'beta', 'gamma']
 PASSPHRASE = os.environ.get('FLEET_PASSWORD', '12345678abcd').encode('utf-8')
 MAIN_PASSPHRASE = os.environ.get('IDENTITY_PASSWORD', '').encode('utf-8')
-
-# The logic: 
-# Alpha: delta-neutral market maker (sells above ref, buys below ref)
-# Beta: long-biased
-# Gamma: short-biased
 
 def load_fleet():
     agents = {}
@@ -29,7 +26,6 @@ def load_fleet():
             agents[member] = {'priv': priv_key, 'did': did}
             logger.info(f"Loaded {member} ({did[:16]}...)")
     
-    # Try loading main identity
     main_path = Path('identity.pem')
     if main_path.exists() and MAIN_PASSPHRASE:
         try:
@@ -70,9 +66,7 @@ def submit_trade(priv_key, did, side, qty, px, until):
         "taker": "any",
         "until": until
     }
-    # terms must be sorted by key, no spaces
     text = json.dumps(terms, separators=(',', ':'), sort_keys=True)
-    msg = f"close-1|terms|{text}"
     
     try:
         resp = technocore_agent.post_signed_message(priv_key, 'close1', text)
@@ -84,47 +78,55 @@ def submit_trade(priv_key, did, side, qty, px, until):
         return None
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--duration', type=float, default=0, help='Duration to run in hours')
+    args = parser.parse_args()
+
     logger.info("Starting Close Call Trading Fleet")
     agents = load_fleet()
     if not agents:
         logger.error("No identities loaded. Exiting.")
         return
-        
-    ref_data = get_latest_ref()
-    if not ref_data:
-        logger.error("Could not fetch latest reference data.")
-        return
-        
-    n = ref_data.get('n', 0)
-    ref_px = float(ref_data.get('ref', {}).get('px', 0))
-    if not ref_px:
-        logger.error("Invalid reference price.")
-        return
-        
-    logger.info(f"Current Sweep: {n}, Ref Price: {ref_px:.2f}")
-    
-    # We will submit trades valid for the next sweep
-    until = n + 1
-    
-    # Execute strategy
-    if 'alpha' in agents:
-        # Market maker: tight spread around ref
-        submit_trade(agents['alpha']['priv'], agents['alpha']['did'], "buy", 0.5, ref_px * 0.99, until)
-        submit_trade(agents['alpha']['priv'], agents['alpha']['did'], "sell", 0.5, ref_px * 1.01, until)
-        
-    if 'beta' in agents:
-        # Long biased
-        submit_trade(agents['beta']['priv'], agents['beta']['did'], "buy", 1.0, ref_px * 0.995, until)
-        
-    if 'gamma' in agents:
-        # Short biased
-        submit_trade(agents['gamma']['priv'], agents['gamma']['did'], "sell", 1.0, ref_px * 1.005, until)
-        
-    if 'main' in agents:
-        # Opportunistic long
-        submit_trade(agents['main']['priv'], agents['main']['did'], "buy", 0.5, ref_px * 0.98, until)
-        
-    logger.info("Execution round complete.")
+
+    end_time = datetime.now() + timedelta(hours=args.duration) if args.duration > 0 else None
+    last_processed_sweep = -1
+
+    while True:
+        try:
+            ref_data = get_latest_ref()
+            if ref_data:
+                n = ref_data.get('n', 0)
+                ref_px = float(ref_data.get('ref', {}).get('px', 0))
+                
+                if n > last_processed_sweep and ref_px > 0:
+                    logger.info(f"--- Processing New Sweep: {n}, Ref Price: {ref_px:.2f} ---")
+                    until = n + 1
+                    
+                    if 'alpha' in agents:
+                        submit_trade(agents['alpha']['priv'], agents['alpha']['did'], "buy", 0.5, ref_px * 0.99, until)
+                        submit_trade(agents['alpha']['priv'], agents['alpha']['did'], "sell", 0.5, ref_px * 1.01, until)
+                        
+                    if 'beta' in agents:
+                        submit_trade(agents['beta']['priv'], agents['beta']['did'], "buy", 1.0, ref_px * 0.995, until)
+                        
+                    if 'gamma' in agents:
+                        submit_trade(agents['gamma']['priv'], agents['gamma']['did'], "sell", 1.0, ref_px * 1.005, until)
+                        
+                    if 'main' in agents:
+                        submit_trade(agents['main']['priv'], agents['main']['did'], "buy", 0.5, ref_px * 0.98, until)
+                        
+                    last_processed_sweep = n
+        except Exception as e:
+            logger.error(f"Main loop error: {e}")
+
+        if end_time and datetime.now() >= end_time:
+            logger.info("Reached maximum duration, exiting.")
+            break
+            
+        if args.duration == 0:
+            break
+            
+        time.sleep(30)
 
 if __name__ == "__main__":
     main()

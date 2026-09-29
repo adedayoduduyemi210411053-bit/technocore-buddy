@@ -54,27 +54,54 @@ def get_latest_ref():
         logger.error(f"Error fetching reference: {e}")
     return None
 
-def submit_trade(priv_key, did, side, qty, px, until):
+def execute_cross_trade(maker, taker, qty, px, until):
     import uuid
+    import base64
+    from cryptography.exceptions import InvalidSignature
+    
     trade_id = uuid.uuid4().hex[:16]
     terms = {
         "id": trade_id,
-        "maker": did,
+        "maker": maker['did'],
         "px": f"{px:.2f}",
         "qty": f"{qty:.2f}",
-        "side": side,
-        "taker": "any",
+        "side": "sell",  # maker is selling to taker
+        "taker": taker['did'],
         "until": until
     }
-    text = json.dumps(terms, separators=(',', ':'), sort_keys=True)
     
+    terms_text = json.dumps(terms, separators=(',', ':'), sort_keys=True)
+    
+    # 1. Maker signs `close-1|terms|<terms>`
+    maker_payload = f"close-1|terms|{terms_text}".encode('utf-8')
+    maker_sig_bytes = maker['priv'].sign(maker_payload)
+    maker_sig = base64.urlsafe_b64encode(maker_sig_bytes).decode('ascii').rstrip('=')
+    
+    # 2. Taker signs `close-1|accept|<terms>|<taker did:key>`
+    taker_payload = f"close-1|accept|{terms_text}|{taker['did']}".encode('utf-8')
+    taker_sig_bytes = taker['priv'].sign(taker_payload)
+    taker_sig = base64.urlsafe_b64encode(taker_sig_bytes).decode('ascii').rstrip('=')
+    
+    # 3. Construct t:trade message
+    trade_msg = {
+        "t": "trade",
+        "season": "close-1",
+        "terms": terms,
+        "taker": taker['did'],
+        "maker_sig": maker_sig,
+        "taker_sig": taker_sig
+    }
+    
+    text = json.dumps(trade_msg, separators=(',', ':'))
+    
+    # Post using either key (using maker here)
     try:
-        resp = technocore_agent.post_signed_message(priv_key, 'close1', text)
+        resp = technocore_agent.post_signed_message(maker['priv'], 'close1', text)
         seq = resp.get('posted', {}).get('seq')
-        logger.info(f"Submitted {side} {qty:.2f} @ {px:.2f} -> seq {seq}")
+        logger.info(f"Cross-trade {qty:.2f} @ {px:.2f} (Maker: {maker['did'][:8]} Taker: {taker['did'][:8]}) -> seq {seq}")
         return seq
     except Exception as e:
-        logger.error(f"Trade submission failed: {e}")
+        logger.error(f"Cross-trade submission failed: {e}")
         return None
 
 def main():
@@ -102,18 +129,14 @@ def main():
                     logger.info(f"--- Processing New Sweep: {n}, Ref Price: {ref_px:.2f} ---")
                     until = n + 1
                     
-                    if 'alpha' in agents:
-                        submit_trade(agents['alpha']['priv'], agents['alpha']['did'], "buy", 0.5, ref_px * 0.99, until)
-                        submit_trade(agents['alpha']['priv'], agents['alpha']['did'], "sell", 0.5, ref_px * 1.01, until)
+                    # Execute cross trades:
+                    # Beta buys from Alpha (Beta is long, Alpha is short)
+                    if 'alpha' in agents and 'beta' in agents:
+                        execute_cross_trade(maker=agents['alpha'], taker=agents['beta'], qty=1.0, px=ref_px, until=until)
                         
-                    if 'beta' in agents:
-                        submit_trade(agents['beta']['priv'], agents['beta']['did'], "buy", 1.0, ref_px * 0.995, until)
-                        
-                    if 'gamma' in agents:
-                        submit_trade(agents['gamma']['priv'], agents['gamma']['did'], "sell", 1.0, ref_px * 1.005, until)
-                        
-                    if 'main' in agents:
-                        submit_trade(agents['main']['priv'], agents['main']['did'], "buy", 0.5, ref_px * 0.98, until)
+                    # Main buys from Gamma (Main is long, Gamma is short)
+                    if 'main' in agents and 'gamma' in agents:
+                        execute_cross_trade(maker=agents['gamma'], taker=agents['main'], qty=1.0, px=ref_px, until=until)
                         
                     last_processed_sweep = n
         except Exception as e:

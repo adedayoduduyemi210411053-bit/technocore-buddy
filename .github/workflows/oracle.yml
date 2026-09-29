@@ -2,7 +2,7 @@ name: Autonomous Oracle & Trading Daemon (Every 5 Mins)
 
 on:
   schedule:
-    - cron: '0 */4 * * *'  # Launches a 4-hour runner every 4 hours to bypass cron throttling
+    - cron: '0 */4 * * *'  # Fallback cron trigger
   workflow_dispatch:
   push:
     branches: [ master ]
@@ -10,6 +10,10 @@ on:
 concurrency:
   group: oracle-continuous-daemon
   cancel-in-progress: true
+
+permissions:
+  actions: write
+  contents: read
 
 jobs:
   run-oracle:
@@ -51,12 +55,18 @@ jobs:
         env:
           FLEET_PASSWORD: "${{ secrets.FLEET_PASSWORD }}"
           IDENTITY_PASSWORD: "${{ secrets.IDENTITY_PASSWORD }}"
-        # Run continuously inside the runner for 4 hours
-        run: python close_call_bot.py --duration 4.0 &
+        # Run continuously inside the runner for 5.5 hours
+        run: python close_call_bot.py --duration 5.5 &
 
       - name: Run Continuous Oracle Daemon
         env:
           IDENTITY_PASSWORD: "${{ secrets.IDENTITY_PASSWORD }}"
           GEMINI_API_KEY: "${{ secrets.GEMINI_API_KEY }}"
-        # Run continuously inside the runner for 4 hours
-        run: python useful_oracle_agent.py --interval 300 --duration 4.0
+        # Run continuously inside the runner for 5.5 hours
+        run: python useful_oracle_agent.py --interval 300 --duration 5.5
+
+      - name: Trigger Next Run
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run oracle.yml -f ref=master

@@ -1,6 +1,8 @@
 node_modules/
 parties.json
 identity.pem
+identity_*.pem
+*.log
 __pycache__/
 *.pyc
 .env

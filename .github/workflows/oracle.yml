@@ -51,12 +51,14 @@ jobs:
           echo "$FLEET_BETA" > identity_beta.pem
           echo "$FLEET_GAMMA" > identity_gamma.pem
           
-      - name: Run Close Call Trading Fleet Daemon
+      - name: Prepare TCLK Parties
         env:
           FLEET_PASSWORD: "${{ secrets.FLEET_PASSWORD }}"
-          IDENTITY_PASSWORD: "${{ secrets.IDENTITY_PASSWORD }}"
+        run: python setup_tclk_parties.py
+
+      - name: Run Autonomous TCLK Market Daemon
         # Run continuously inside the runner for 5.5 hours
-        run: python close_call_bot.py --duration 5.5 &
+        run: node tclk_worker.mjs --duration 5.5 &
 
       - name: Run Continuous Oracle Daemon
         env:

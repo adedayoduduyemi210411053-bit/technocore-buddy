@@ -20,6 +20,11 @@ for name in ['alpha', 'beta', 'gamma']:
         }
         print(f"Loaded {name}: {did}")
 
+if 'alpha' in keys:
+    keys['payer'] = keys['alpha']['seed']
+if 'beta' in keys:
+    keys['payee'] = keys['beta']['seed']
+
 with open("parties.json", "w") as f:
     json.dump(keys, f, indent=2)
 

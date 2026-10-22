@@ -49,7 +49,10 @@ function loadSigners() {
   const raw = JSON.parse(readFileSync("parties.json", "utf8"));
   const signers = {};
   for (const [name, info] of Object.entries(raw)) {
-    const seedBuf = Buffer.from(info.seed, "hex");
+    if (name === "payer" || name === "payee") continue;
+    const seedHex = typeof info === "string" ? info : info?.seed;
+    if (!seedHex) continue;
+    const seedBuf = Buffer.from(seedHex, "hex");
     const s = signerFromSeed(seedBuf);
     signers[name] = s;
     console.log(`🔑 Loaded [${name}]: ${s.did}`);

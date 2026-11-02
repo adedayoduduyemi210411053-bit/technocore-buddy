@@ -151,9 +151,78 @@ async function registerCapabilities() {
 // Active accepted contracts waiting for payer locks
 const activeContracts = new Map();
 
+// Active payer offers broadcast to strangers and waiting for stranger accepts
+const myPayerOffers = new Map();
+const myPayerContracts = new Map();
+
 // Helper to check if DID belongs to our fleet
 function isOurDid(did) {
   return Object.values(signers).some((s) => s.did === did);
+}
+
+// Broadcast an open Payer Offer to the network for external compute/inference
+async function broadcastPayerOffer() {
+  const now = Date.now();
+  for (const [id, off] of myPayerOffers.entries()) {
+    if (off.expiresMs > now) return; // Still active
+    myPayerOffers.delete(id);
+  }
+
+  const payer = worker;
+  const offer = makeOffer({
+    from: payer.did,
+    role: "payer",
+    amount: "100",
+    asset: "FLOP",
+    lock: "hash",
+    rails: ["flop-htlc", "paper"],
+    claimByMs: now + 30 * 60_000,
+    refundAfterMs: now + 60 * 60_000,
+    expiresMs: now + 15 * 60_000,
+    job: { proto: "acp", id: `inference_batch_${randomBytes(4).toString("hex")}` },
+  });
+
+  try {
+    await post(payer, OFFER_ROOM, offer);
+    myPayerOffers.set(offer.id, offer);
+    console.log(`\n📢 [Broadcast Open Payer Offer] Offering 100 FLOP for external network compute! ID: ${offer.id.slice(0, 16)}...`);
+  } catch (err) {
+    console.log(`   ⚠ Broadcast offer notice: ${err.message}`);
+  }
+}
+
+// Handle an incoming stranger accept on our broadcast offer
+async function handleStrangerAccept(accept) {
+  if (isOurDid(accept.from)) return;
+  if (!myPayerOffers.has(accept.ref)) return;
+  const offer = myPayerOffers.get(accept.ref);
+  if (myPayerContracts.has(accept.contract)) return;
+
+  console.log(`\n🤝 [Stranger Accepted Our Payer Offer!]`);
+  console.log(`   Payee Agent: ${accept.from.slice(0, 20)}...`);
+  console.log(`   Contract: ${accept.contract.slice(0, 18)}... | Statement: ${accept.statement.slice(0, 16)}...`);
+
+  const room = dealRoom(accept.contract);
+  const payer = worker;
+  try {
+    const terms = { contract: accept.contract, lock: "hash", statement: accept.statement, refundAfterMs: offer.refundAfterMs };
+    const ref = await rail.lock(terms);
+    const lockFrame = { type: "lock", from: payer.did, contract: accept.contract, rail: "paper", ref };
+    await post(payer, room, lockFrame);
+    console.log(`   🔒 [Escrow Locked!] Deposited 100 FLOP into deal room /r/${room} (Ref: ${ref.slice(0, 16)}...)`);
+
+    myPayerContracts.set(accept.contract, {
+      contract: accept.contract,
+      room,
+      payee: accept.from,
+      ref,
+      offer,
+      createdAt: Date.now(),
+      status: "locked",
+    });
+  } catch (err) {
+    console.log(`   ⚠ Payer escrow lock notice: ${err.message}`);
+  }
 }
 
 // Snipe an incoming stranger offer
@@ -252,6 +321,43 @@ async function checkDealRooms() {
       // room might not be created yet, perfectly normal
     }
   }
+
+  // Also check our active payer contracts where we are the Payer waiting for Payee to reveal
+  for (const [contractId, item] of myPayerContracts.entries()) {
+    if (item.status !== "locked") continue;
+
+    if (Date.now() > item.offer.refundAfterMs) {
+      console.log(`   ⌛ Payer Contract ${contractId.slice(0, 14)}... refund timeout reached. Removing.`);
+      myPayerContracts.delete(contractId);
+      continue;
+    }
+
+    try {
+      const res = await req(`${BASE}/r/${item.room}?format=json`, undefined, `read ${item.room}`);
+      if (!res.ok) continue;
+      const data = await res.json();
+      const messages = data.messages ?? [];
+
+      for (const m of messages) {
+        if (!m.text || !m.text.startsWith("tclk1 ")) continue;
+        let frame;
+        try { frame = decodeFrame(m.text); } catch { continue; }
+
+        if (frame.type === "reveal" && frame.contract === contractId) {
+          console.log(`\n🎉 [Stranger Compute Task Delivered & Preimage Revealed!]`);
+          console.log(`   Contract: ${contractId.slice(0, 16)}... | Payee: ${item.payee.slice(0, 16)}...`);
+          
+          // Post receipt acknowledgment
+          const receipt = { type: "receipt", from: worker.did, contract: contractId, outcome: "claimed" };
+          try { await post(worker, item.room, receipt); } catch {}
+          
+          item.status = "claimed";
+          console.log(`   💸 [Settled Compute Session] Paid ${item.offer.amount} ${item.offer.asset} for verified external agent compute!`);
+          break;
+        }
+      }
+    } catch (e) {}
+  }
 }
 
 // Run an internal bilateral deal cycle between Alpha and Beta
@@ -307,10 +413,12 @@ async function runBilateralRehearsal() {
 async function main() {
   await registerCapabilities();
 
-  // Run initial bilateral deal
+  // Run initial bilateral deal and broadcast initial Payer Offer
   await runBilateralRehearsal();
+  await broadcastPayerOffer();
 
   let lastBilateralTime = Date.now();
+  let lastBroadcastTime = Date.now();
   let lastSeq = 0;
 
   // Initial scan of tclk-offers
@@ -325,7 +433,7 @@ async function main() {
     }
   } catch {}
 
-  console.log(`\n👀 Listening for open market offers starting from seq ${lastSeq}...`);
+  console.log(`\n👀 Listening for open market offers & accepts starting from seq ${lastSeq}...`);
 
   while (true) {
     if (endTime && Date.now() >= endTime) {
@@ -347,14 +455,22 @@ async function main() {
               const frame = decodeFrame(m.text);
               if (frame.type === "offer") {
                 await handleStrangerOffer(frame);
+              } else if (frame.type === "accept") {
+                await handleStrangerAccept(frame);
               }
             } catch {}
           }
         }
       }
 
-      // Check deal rooms for locks
+      // Check deal rooms for locks and reveals
       await checkDealRooms();
+
+      // Broadcast an open payer offer for external compute every 10 minutes
+      if (Date.now() - lastBroadcastTime > 10 * 60 * 1000) {
+        await broadcastPayerOffer();
+        lastBroadcastTime = Date.now();
+      }
 
       // Periodic bilateral activity every 20 minutes
       if (Date.now() - lastBilateralTime > 20 * 60 * 1000) {

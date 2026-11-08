@@ -1,0 +1,15 @@
+{
+  "sessions": [],
+  "txs": [
+    {
+      "type": "reportTaskCompletion",
+      "agentId": "0x32f3ff0a7ad6148d28112068e7123de76b5cb4b7487ce4c2d5877a5aa4104db1",
+      "block": "3204394",
+      "txHash": "0x2a94705b45859668ce37dc5cfba2410de3bc0f5df44bd22c24adc05ddbcbeeaf",
+      "timestamp": "2026-11-08T09:24:42.571Z"
+    }
+  ],
+  "stats": {},
+  "lastRun": "2026-11-08T09:24:42.571Z",
+  "headBlock": "3204394"
+}

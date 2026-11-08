@@ -60,6 +60,10 @@ jobs:
         # Run continuously inside the runner for 5.5 hours
         run: node tclk_worker.mjs --duration 5.5 &
 
+      - name: Run FLOP Network Devnet Worker Daemon
+        # Run continuously inside the runner for 5.5 hours, cycling every 15 minutes
+        run: node devnet_worker.mjs --duration 5.5 --interval 15 &
+
       - name: Run Continuous Oracle Daemon
         env:
           IDENTITY_PASSWORD: "${{ secrets.IDENTITY_PASSWORD }}"

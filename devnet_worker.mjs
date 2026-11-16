@@ -15,9 +15,10 @@ import { Keyring } from '@polkadot/keyring';
 import fs from 'fs';
 import path from 'path';
 
-const RPC_URL = process.env.FLOP_RPC_URL || 'wss://rpc.devnet.flop.network';
-const GATEWAY_URL = process.env.FLOP_GATEWAY_URL || 'https://api.flop.network';
-const FAUCET_URL = process.env.FLOP_FAUCET_URL || 'https://faucet.flop.network';
+const TARGET_NETWORK = process.env.FLOP_NETWORK || 'devnet';
+const RPC_URL = process.env.FLOP_RPC_URL || (TARGET_NETWORK === 'testnet' ? 'wss://testnet.flop.network' : 'wss://rpc.devnet.flop.network');
+const GATEWAY_URL = process.env.FLOP_GATEWAY_URL || (TARGET_NETWORK === 'testnet' ? 'https://gateway.testnet.flop.network' : 'https://api.flop.network');
+const FAUCET_URL = process.env.FLOP_FAUCET_URL || (TARGET_NETWORK === 'testnet' ? 'https://faucet.testnet.flop.network' : 'https://faucet.flop.network');
 const HISTORY_FILE = 'devnet_history.json';
 const KEY_FILE = 'gateway_key.json';
 

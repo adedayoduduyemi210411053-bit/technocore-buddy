@@ -15,7 +15,9 @@ import { Keyring } from '@polkadot/keyring';
 import fs from 'fs';
 import path from 'path';
 
-const TARGET_NETWORK = process.env.FLOP_NETWORK || 'devnet';
+const TESTNET_LAUNCH_TIMESTAMP = 1795503600000; // Tuesday, Nov 24, 2026 at 07:00:00 UTC
+const autoSelectTestnet = Date.now() >= TESTNET_LAUNCH_TIMESTAMP;
+const TARGET_NETWORK = process.env.FLOP_NETWORK || (autoSelectTestnet ? 'testnet' : 'devnet');
 const RPC_URL = process.env.FLOP_RPC_URL || (TARGET_NETWORK === 'testnet' ? 'wss://testnet.flop.network' : 'wss://rpc.devnet.flop.network');
 const GATEWAY_URL = process.env.FLOP_GATEWAY_URL || (TARGET_NETWORK === 'testnet' ? 'https://gateway.testnet.flop.network' : 'https://api.flop.network');
 const FAUCET_URL = process.env.FLOP_FAUCET_URL || (TARGET_NETWORK === 'testnet' ? 'https://faucet.testnet.flop.network' : 'https://faucet.flop.network');
@@ -198,7 +200,8 @@ export async function runDevnetCycle() {
     const freeFlop = Number(freePlanck / (10n ** 15n)) / 1000;
     log(`[${item.role}] Balance: ${freeFlop} FLOP (${freePlanck} planck)`);
 
-    if (freeFlop < 3.0) {
+    // On testnet, claim faucet aggressively to maximize spendable balance for inference vouchers
+    if (TARGET_NETWORK === 'testnet' || freeFlop < 3.0) {
       await requestFaucet(item.pair.address);
       await sleep(2000);
     }
@@ -250,7 +253,11 @@ export async function runDevnetCycle() {
   }
 
   // 5. Execute Inference & Report Completion
-  await executeInferenceTask();
+  const inferenceCycles = TARGET_NETWORK === 'testnet' ? 3 : 1;
+  for (let c = 0; c < inferenceCycles; c++) {
+    await executeInferenceTask(`Analyze autonomous multi-agent coordination, settlement proofs, and PoUI verification #${Date.now()}`);
+    if (inferenceCycles > 1) await sleep(1500);
+  }
 
   if (alphaAgentId) {
     log(`Reporting verified task completion on-chain for agent ${alphaAgentId}...`);

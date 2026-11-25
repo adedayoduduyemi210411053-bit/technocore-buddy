@@ -12,15 +12,17 @@
 
 import { ApiPromise, WsProvider } from '@polkadot/api';
 import { Keyring } from '@polkadot/keyring';
+import { stringToU8a, u8aWrapBytes } from '@polkadot/util';
 import fs from 'fs';
 import path from 'path';
 
 const TESTNET_LAUNCH_TIMESTAMP = 1795503600000; // Tuesday, Nov 24, 2026 at 07:00:00 UTC
+const TESTNET_GENESIS = '0x918abd58fb16306b30ef3886514cfaebffecb4de43e82b6f8ec4795c43cfd800';
 const autoSelectTestnet = Date.now() >= TESTNET_LAUNCH_TIMESTAMP;
 const TARGET_NETWORK = process.env.FLOP_NETWORK || (autoSelectTestnet ? 'testnet' : 'devnet');
 const RPC_URL = process.env.FLOP_RPC_URL || (TARGET_NETWORK === 'testnet' ? 'wss://testnet.flop.network' : 'wss://rpc.devnet.flop.network');
 const GATEWAY_URL = process.env.FLOP_GATEWAY_URL || (TARGET_NETWORK === 'testnet' ? 'https://gateway.testnet.flop.network' : 'https://api.flop.network');
-const FAUCET_URL = process.env.FLOP_FAUCET_URL || (TARGET_NETWORK === 'testnet' ? 'https://faucet.testnet.flop.network' : 'https://faucet.flop.network');
+const FAUCET_URL = process.env.FLOP_FAUCET_URL || 'https://faucet.flop.network';
 const HISTORY_FILE = 'devnet_history.json';
 const KEY_FILE = 'gateway_key.json';
 
@@ -48,23 +50,42 @@ function saveHistory(data) {
   fs.writeFileSync(HISTORY_FILE, JSON.stringify(data, null, 2));
 }
 
-async function requestFaucet(address) {
+async function requestFaucet(pair) {
+  const address = typeof pair === 'string' ? pair : pair.address;
   log(`Requesting faucet top-up for ${address}...`);
   try {
-    const res = await fetch(`${FAUCET_URL}/fund`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'User-Agent': 'Mozilla/5.0'
-      },
-      body: JSON.stringify({ address })
-    });
-    const data = await res.json();
-    if (data.success) {
-      log(`Faucet funded ${data.amount} FLOP to ${address}! Tx: ${data.txHash}`);
-      return data;
+    if (TARGET_NETWORK === 'testnet' && typeof pair === 'object' && pair.sign) {
+      const nonce = Date.now().toString();
+      const challenge = `flop-faucet-agent/v1|${TESTNET_GENESIS}|${address}|${nonce}`;
+      const sigBytes = pair.sign(u8aWrapBytes(stringToU8a(challenge)));
+      const signature = '0x' + Buffer.from(sigBytes).toString('hex');
+      const res = await fetch(`${FAUCET_URL}/v1/testnet/agent-claims`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0' },
+        body: JSON.stringify({ address, nonce, signature }),
+        signal: AbortSignal.timeout(15000)
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        log(`Testnet faucet funded ${data.amount || 10} FLOP to ${address}! Tx: ${data.txHash}`);
+        return data;
+      } else {
+        log(`Testnet faucet notice (HTTP ${res.status}): ${data.error || JSON.stringify(data)}`);
+      }
     } else {
-      log(`Faucet notice: ${data.error || JSON.stringify(data)}`);
+      const res = await fetch(`${FAUCET_URL}/fund`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0' },
+        body: JSON.stringify({ address }),
+        signal: AbortSignal.timeout(15000)
+      });
+      const data = await res.json();
+      if (data.success) {
+        log(`Faucet funded ${data.amount} FLOP to ${address}! Tx: ${data.txHash}`);
+        return data;
+      } else {
+        log(`Faucet notice: ${data.error || JSON.stringify(data)}`);
+      }
     }
   } catch (err) {
     log(`Faucet request error: ${err.message}`);
@@ -202,7 +223,7 @@ export async function runDevnetCycle() {
 
     // On testnet, claim faucet aggressively to maximize spendable balance for inference vouchers
     if (TARGET_NETWORK === 'testnet' || freeFlop < 3.0) {
-      await requestFaucet(item.pair.address);
+      await requestFaucet(item.pair);
       await sleep(2000);
     }
   }

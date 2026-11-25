@@ -229,31 +229,68 @@ export async function runDevnetCycle() {
   }
 
   // 2. Verify On-Chain Agent Registrations
-  const alphaAgents = await api.query.agentIdentity.agentsByOwner(alphaPair.addressRaw);
-  let alphaAgentId = alphaAgents.length > 0 ? alphaAgents[0].toHex() : null;
+  let alphaAgentId = null;
+  try {
+    const alphaAgents = await api.query.agentIdentity.agentsByOwner(alphaPair.address);
+    alphaAgentId = (alphaAgents && alphaAgents.length > 0) ? alphaAgents[0].toHex() : null;
 
-  if (!alphaAgentId) {
-    log('Registering Fleet Alpha on-chain with 10 FLOP stake...');
-    const regTx = api.tx.agentIdentity.registerAgent(
-      'Technocore Fleet Alpha',
-      'Autonomous',
-      ['Planning', 'ToolUse', 'LogicalReasoning', 'CodeGeneration'],
-      ['https://technocore.chat'],
-      'https://github.com/adedayoduduyemi210411053-bit/technocore-buddy',
-      10n * (10n ** 18n)
-    );
-    await new Promise((resolve) => {
-      regTx.signAndSend(alphaPair, ({ status, txHash }) => {
-        if (status.isInBlock || status.isFinalized) {
-          log(`Alpha registered in block! Tx: ${txHash.toHex()}`);
-          resolve();
+    if (!alphaAgentId) {
+      const { data: alphaBal } = await api.query.system.account(alphaPair.address);
+      const freePlanck = BigInt(alphaBal.free.toString());
+      const minStake = 10n * (10n ** 18n);
+
+      // If Fleet Alpha is slightly below 10 FLOP due to fee (e.g. 9.997 FLOP), check if Beta has funds to top it up
+      if (freePlanck < minStake) {
+        log(`Fleet Alpha has ${(Number(freePlanck) / 1e18).toFixed(4)} FLOP (needs 10.0 FLOP for stake). Checking fleet liquidity...`);
+        const { data: betaBal } = await api.query.system.account(betaPair.address);
+        if (BigInt(betaBal.free.toString()) >= (1n * (10n ** 18n))) {
+          log('Transferring 1 FLOP from Fleet Beta to Fleet Alpha to complete staking requirement...');
+          const xferTx = api.tx.balances.transferKeepAlive(alphaPair.address, 1n * (10n ** 18n));
+          await new Promise((resolve) => {
+            xferTx.signAndSend(betaPair, ({ status }) => {
+              if (status.isInBlock || status.isFinalized) resolve();
+            });
+          });
         }
-      });
-    });
-    const refreshed = await api.query.agentIdentity.agentsByOwner(alphaPair.addressRaw);
-    alphaAgentId = refreshed.length > 0 ? refreshed[0].toHex() : null;
+      }
+
+      const { data: updatedBal } = await api.query.system.account(alphaPair.address);
+      if (BigInt(updatedBal.free.toString()) >= minStake) {
+        log('Registering Fleet Alpha on-chain with 10 FLOP stake...');
+        const regTx = api.tx.agentIdentity.registerAgent(
+          'technocore-fleet-alpha',
+          'Autonomous',
+          ['TextGeneration', 'Planning', 'ToolUse', 'CodeGeneration'],
+          ['https://technocore.chat'],
+          'https://github.com/adedayoduduyemi210411053-bit/technocore-buddy',
+          minStake
+        );
+        await new Promise((resolve) => {
+          regTx.signAndSend(alphaPair, ({ status, txHash, dispatchError }) => {
+            if (dispatchError) {
+              if (dispatchError.isModule) {
+                const decoded = api.registry.findMetaError(dispatchError.asModule);
+                log(`Registration dispatch error: ${decoded.section}.${decoded.name}`);
+              } else {
+                log(`Registration dispatch error: ${dispatchError.toString()}`);
+              }
+              resolve();
+            } else if (status.isInBlock || status.isFinalized) {
+              log(`Alpha registered in block! Tx: ${txHash.toHex()}`);
+              resolve();
+            }
+          });
+        });
+        const refreshed = await api.query.agentIdentity.agentsByOwner(alphaPair.address);
+        alphaAgentId = (refreshed && refreshed.length > 0) ? refreshed[0].toHex() : null;
+      } else {
+        log(`Alpha pending staking requirement: currently has ${(Number(updatedBal.free.toString()) / 1e18).toFixed(4)} FLOP.`);
+      }
+    }
+  } catch (err) {
+    log(`Registration check warning: ${err.message}`);
   }
-  log(`Fleet Alpha Agent ID: ${alphaAgentId}`);
+  log(`Fleet Alpha Agent ID: ${alphaAgentId || 'unregistered (pending stake)'}`);
 
   // 3. Try Gateway Enrollment
   await tryGatewayEnrollment(alphaPair);
